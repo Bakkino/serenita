@@ -94,7 +94,10 @@ function ConnettoriContent() {
         body: JSON.stringify({ aspsp_name: "Intesa Sanpaolo", country: "IT" }),
       });
 
-      if (!res.ok) throw new Error("Errore nell'avvio del collegamento");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error || "Errore nell'avvio del collegamento");
+      }
 
       const { url } = await res.json();
       // Redirige alla banca per l'autorizzazione

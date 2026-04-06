@@ -15,17 +15,31 @@ export async function POST(req: Request) {
   const aspspName = body.aspsp_name || "Intesa Sanpaolo";
   const aspspCountry = body.country || "IT";
 
-  // Genera state CSRF — salvato temporaneamente come VerificationToken
-  const state = randomBytes(32).toString("hex");
-  await prisma.verificationToken.create({
-    data: {
-      identifier: `banking_state_${user.id}`,
-      token: state,
-      expires: new Date(Date.now() + 10 * 60 * 1000), // Scade in 10 minuti
-    },
-  });
-
   try {
+    // Genera state CSRF — salvato temporaneamente come VerificationToken
+    const state = randomBytes(32).toString("hex");
+
+    // Pulisci eventuali token scaduti o vecchi per questo utente
+    await prisma.verificationToken.deleteMany({
+      where: {
+        identifier: `banking_state_${user.id}`,
+      },
+    });
+
+    await prisma.verificationToken.create({
+      data: {
+        identifier: `banking_state_${user.id}`,
+        token: state,
+        expires: new Date(Date.now() + 10 * 60 * 1000), // Scade in 10 minuti
+      },
+    });
+
+    // Debug: verifica che la chiave privata sia presente
+    const keyPresent = !!process.env.ENABLE_BANKING_PRIVATE_KEY;
+    const keyLength = process.env.ENABLE_BANKING_PRIVATE_KEY?.length || 0;
+    const keyStart = process.env.ENABLE_BANKING_PRIVATE_KEY?.substring(0, 30) || "MISSING";
+    console.log(`[banking-auth] Key present: ${keyPresent}, length: ${keyLength}, starts with: ${keyStart}`);
+
     const result = await startAuth({
       aspspName,
       aspspCountry,
@@ -34,9 +48,11 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ url: result.url, state });
   } catch (err) {
-    console.error("Banking auth error:", (err as Error).message);
+    const msg = (err as Error).message;
+    console.error("[banking-auth] ERRORE COMPLETO:", msg);
+    // Restituisci l'errore dettagliato al frontend per debug
     return NextResponse.json(
-      { error: (err as Error).message },
+      { error: msg },
       { status: 500 }
     );
   }
