@@ -80,7 +80,7 @@ export async function startAuth(params: StartAuthParams): Promise<StartAuthResul
     headers: authHeaders(),
     body: JSON.stringify({
       access: {
-        valid_until: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+        valid_until: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
       },
       aspsp: {
         name: params.aspspName,
