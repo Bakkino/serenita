@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
+// Forza esecuzione dinamica (no cache)
+export const dynamic = "force-dynamic";
+
 // TEMPORANEO — endpoint di debug per verificare lo stato del database
 // Da rimuovere dopo il debug
 export async function GET() {
@@ -9,7 +12,7 @@ export async function GET() {
   });
 
   const providers = await prisma.provider.findMany({
-    select: { id: true, userId: true, slug: true, name: true, status: true },
+    select: { id: true, userId: true, slug: true, name: true, status: true, lastSyncError: true },
   });
 
   const sessions = await prisma.enableBankingSession.findMany({
