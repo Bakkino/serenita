@@ -65,6 +65,7 @@ export interface StartAuthParams {
   aspspName: string;    // es. "Intesa Sanpaolo"
   aspspCountry: string; // es. "IT"
   state: string;        // CSRF protection
+  iban?: string;        // IBAN specifico (necessario per alcune banche come Fineco)
 }
 
 export interface StartAuthResult {
@@ -82,6 +83,10 @@ export async function startAuth(params: StartAuthParams): Promise<StartAuthResul
     body: JSON.stringify({
       access: {
         valid_until: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+        balances: true,
+        transactions: true,
+        // Alcune banche (es. Fineco) richiedono l'IBAN esplicito per restituire gli account
+        ...(params.iban ? { accounts: [{ iban: params.iban }] } : {}),
       },
       aspsp: {
         name: params.aspspName,

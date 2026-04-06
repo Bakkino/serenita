@@ -14,6 +14,7 @@ export async function POST(req: Request) {
   const body = await req.json();
   const aspspName = body.aspsp_name;
   const aspspCountry = body.country;
+  const iban = body.iban || undefined; // IBAN opzionale — necessario per banche come Fineco
 
   if (!aspspName || !aspspCountry) {
     return NextResponse.json({ error: "Seleziona una banca" }, { status: 400 });
@@ -48,6 +49,7 @@ export async function POST(req: Request) {
       aspspName,
       aspspCountry,
       state,
+      iban,
     });
 
     return NextResponse.json({ url: result.url, state });

@@ -68,6 +68,9 @@ function ConnettoriContent() {
   const [showBankSelector, setShowBankSelector] = useState(false);
   const [banks, setBanks] = useState<Bank[]>([]);
   const [bankSearch, setBankSearch] = useState("");
+  // Step 2: conferma banca con IBAN opzionale
+  const [selectedBank, setSelectedBank] = useState<Bank | null>(null);
+  const [ibanInput, setIbanInput] = useState("");
 
   // Messaggi dal callback
   useEffect(() => {
@@ -110,9 +113,16 @@ function ConnettoriContent() {
     }
   }
 
-  // Collega banca selezionata
-  async function handleConnect(bank: Bank) {
+  // Step 1: seleziona banca → mostra conferma con campo IBAN
+  function handleSelectBank(bank: Bank) {
+    setSelectedBank(bank);
+    setIbanInput("");
+  }
+
+  // Step 2: collega banca (con IBAN opzionale)
+  async function handleConnect(bank: Bank, iban?: string) {
     setShowBankSelector(false);
+    setSelectedBank(null);
     setConnecting(true);
     setMessage(null);
 
@@ -120,7 +130,11 @@ function ConnettoriContent() {
       const res = await fetch("/api/banking/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ aspsp_name: bank.name, country: bank.country }),
+        body: JSON.stringify({
+          aspsp_name: bank.name,
+          country: bank.country,
+          ...(iban ? { iban: iban.replace(/\s/g, "").toUpperCase() } : {}),
+        }),
       });
 
       if (!res.ok) {
@@ -229,47 +243,105 @@ function ConnettoriContent() {
       {showBankSelector && (
         <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[70vh] flex flex-col">
-            <div className="p-5 border-b border-gray-100">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-display text-lg text-serenita-slate">Seleziona la tua banca</h3>
-                <button
-                  onClick={() => setShowBankSelector(false)}
-                  className="text-serenita-muted hover:text-serenita-slate text-xl leading-none"
-                >
-                  x
-                </button>
-              </div>
-              <input
-                type="text"
-                value={bankSearch}
-                onChange={(e) => setBankSearch(e.target.value)}
-                placeholder="Cerca banca..."
-                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-serenita-slate/30"
-                autoFocus
-              />
-            </div>
-            <div className="overflow-y-auto p-2">
-              {filteredBanks.map((bank) => (
-                <button
-                  key={`${bank.name}-${bank.country}`}
-                  onClick={() => handleConnect(bank)}
-                  className="w-full text-left px-4 py-3 rounded-xl hover:bg-serenita-gold/5 transition-colors flex items-center gap-3"
-                >
-                  <span className="w-8 h-8 rounded-full bg-serenita-slate/10 flex items-center justify-center text-xs font-bold text-serenita-slate">
-                    {bank.name.charAt(0)}
-                  </span>
-                  <div>
-                    <p className="font-medium text-serenita-slate text-sm">{bank.name}</p>
-                    <p className="text-xs text-serenita-muted">Open Banking PSD2</p>
+            {/* Step 2: Conferma banca con IBAN opzionale */}
+            {selectedBank ? (
+              <>
+                <div className="p-5 border-b border-gray-100">
+                  <div className="flex items-center justify-between mb-3">
+                    <button
+                      onClick={() => setSelectedBank(null)}
+                      className="text-serenita-muted hover:text-serenita-slate text-sm"
+                    >
+                      ← Indietro
+                    </button>
+                    <button
+                      onClick={() => { setShowBankSelector(false); setSelectedBank(null); }}
+                      className="text-serenita-muted hover:text-serenita-slate text-xl leading-none"
+                    >
+                      x
+                    </button>
                   </div>
-                </button>
-              ))}
-              {filteredBanks.length === 0 && (
-                <p className="text-center text-serenita-muted text-sm py-8">
-                  Nessuna banca trovata
-                </p>
-              )}
-            </div>
+                  <div className="flex items-center gap-3 mb-4">
+                    <span className="w-10 h-10 rounded-full bg-serenita-slate/10 flex items-center justify-center text-sm font-bold text-serenita-slate">
+                      {selectedBank.name.charAt(0)}
+                    </span>
+                    <div>
+                      <p className="font-medium text-serenita-slate">{selectedBank.name}</p>
+                      <p className="text-xs text-serenita-muted">Open Banking PSD2</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-5 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-serenita-slate mb-1">
+                      IBAN (opzionale)
+                    </label>
+                    <input
+                      type="text"
+                      value={ibanInput}
+                      onChange={(e) => setIbanInput(e.target.value)}
+                      placeholder="IT00 X000 0000 0000 0000 0000 000"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-serenita-slate/30 font-mono"
+                    />
+                    <p className="text-xs text-serenita-muted mt-1">
+                      Alcune banche (es. Fineco) richiedono l&apos;IBAN per collegare il conto.
+                      Per le altre e&apos; opzionale.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleConnect(selectedBank, ibanInput || undefined)}
+                    className="w-full px-4 py-3 rounded-lg font-medium bg-serenita-slate text-white hover:bg-serenita-slate/90 transition-all"
+                  >
+                    Collega {selectedBank.name}
+                  </button>
+                </div>
+              </>
+            ) : (
+              /* Step 1: Lista banche */
+              <>
+                <div className="p-5 border-b border-gray-100">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-display text-lg text-serenita-slate">Seleziona la tua banca</h3>
+                    <button
+                      onClick={() => setShowBankSelector(false)}
+                      className="text-serenita-muted hover:text-serenita-slate text-xl leading-none"
+                    >
+                      x
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={bankSearch}
+                    onChange={(e) => setBankSearch(e.target.value)}
+                    placeholder="Cerca banca..."
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-serenita-slate/30"
+                    autoFocus
+                  />
+                </div>
+                <div className="overflow-y-auto p-2">
+                  {filteredBanks.map((bank) => (
+                    <button
+                      key={`${bank.name}-${bank.country}`}
+                      onClick={() => handleSelectBank(bank)}
+                      className="w-full text-left px-4 py-3 rounded-xl hover:bg-serenita-gold/5 transition-colors flex items-center gap-3"
+                    >
+                      <span className="w-8 h-8 rounded-full bg-serenita-slate/10 flex items-center justify-center text-xs font-bold text-serenita-slate">
+                        {bank.name.charAt(0)}
+                      </span>
+                      <div>
+                        <p className="font-medium text-serenita-slate text-sm">{bank.name}</p>
+                        <p className="text-xs text-serenita-muted">Open Banking PSD2</p>
+                      </div>
+                    </button>
+                  ))}
+                  {filteredBanks.length === 0 && (
+                    <p className="text-center text-serenita-muted text-sm py-8">
+                      Nessuna banca trovata
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
