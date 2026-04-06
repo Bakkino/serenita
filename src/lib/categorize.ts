@@ -1,28 +1,35 @@
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
-// Cerca una categoria il cui matchRules matchi la descrizione della transazione
-// matchRules è un JSON array di stringhe: ["adobe", "creative cloud"]
-// Se la descrizione contiene una di queste parole, la categoria è un match
+// Auto-categorizzazione basata su keyword matching
+// Cerca tra le categorie dell'utente se la descrizione matcha le regole (matchRules)
+// Ritorna l'ID della categoria o null se nessuna corrisponde
 export async function autoMatchCategory(
   userId: string,
   description: string
 ): Promise<string | null> {
+  if (!description) return null;
+
   const categories = await prisma.category.findMany({
-    where: { userId, matchRules: { not: Prisma.JsonNull } },
+    where: { userId },
+    select: { id: true, name: true, matchRules: true },
   });
 
   const descLower = description.toLowerCase();
 
   for (const cat of categories) {
-    const rules = cat.matchRules as string[] | null;
-    if (!rules || !Array.isArray(rules)) continue;
+    // Controlla matchRules (array di keyword salvate come JSON)
+    if (cat.matchRules && Array.isArray(cat.matchRules)) {
+      for (const rule of cat.matchRules) {
+        if (typeof rule === "string" && descLower.includes(rule.toLowerCase())) {
+          return cat.id;
+        }
+      }
+    }
 
-    const matches = rules.some((rule) =>
-      descLower.includes(rule.toLowerCase())
-    );
-
-    if (matches) return cat.id;
+    // Fallback: controlla se il nome categoria appare nella descrizione
+    if (descLower.includes(cat.name.toLowerCase())) {
+      return cat.id;
+    }
   }
 
   return null;
