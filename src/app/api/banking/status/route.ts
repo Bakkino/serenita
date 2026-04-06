@@ -7,6 +7,8 @@ import { differenceInDays } from "date-fns";
 // Stato di tutte le connessioni bancarie: conti, saldi, ultima sync, scadenza PSD2
 export async function GET() {
   const user = await getCurrentUser();
+  console.log("[banking-status] user:", user?.id || "NULL");
+
   if (!user) return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
 
   const sessions = await prisma.enableBankingSession.findMany({
@@ -25,6 +27,8 @@ export async function GET() {
     },
     orderBy: { createdAt: "desc" },
   });
+
+  console.log("[banking-status] sessions found:", sessions.length, sessions.map(s => ({ id: s.id, accountId: s.accountId, bankAccountId: s.bankAccountId, isActive: s.isActive })));
 
   const now = new Date();
 
