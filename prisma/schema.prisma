@@ -1,0 +1,586 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// AUTH (NextAuth.js)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  
+  accounts      Account[]
+  sessions      Session[]
+  
+  // Relazioni app
+  bankAccounts             BankAccount[]
+  transactions             Transaction[]
+  invoices                 Invoice[]
+  debts                    Debt[]
+  taxDeadlines             TaxDeadline[]
+  projects                 Project[]
+  providers                Provider[]
+  categories               Category[]
+  importLogs               ImportLog[]
+  enableBankingSessions    EnableBankingSession[]
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  
+  @@unique([identifier, token])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ENABLE BANKING (Open Banking PSD2)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model EnableBankingSession {
+  id              String    @id @default(cuid())
+  userId          String
+  sessionId       String    // Enable Banking session ID
+  accountId       String    // Enable Banking account ID
+  bankAccountId   String?   // Collegamento al nostro BankAccount
+  iban            String?
+  aspspName       String?   // Nome banca (es. "Intesa Sanpaolo")
+  aspspCountry    String    @default("IT")
+  validUntil      DateTime? // Scadenza autorizzazione PSD2 (90 giorni)
+  lastSyncAt      DateTime?
+  lastSyncError   String?
+  syncCount       Int       @default(0) // Contatore sync giornaliere (max 4)
+  syncCountDate   DateTime? // Data dell'ultimo reset contatore
+  isActive        Boolean   @default(true)
+
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccount     BankAccount? @relation(fields: [bankAccountId], references: [id])
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([userId, isActive])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PROVIDER / CONNETTORI
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+enum ProviderType {
+  BANK
+  PAYMENT
+  FISCAL
+  MANUAL
+}
+
+enum ConnectionStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+  SYNCING
+}
+
+model Provider {
+  id              String           @id @default(cuid())
+  userId          String
+  slug            String           // "intesa", "fineco", "paypal", "sdi"
+  name            String           // "Intesa Sanpaolo"
+  type            ProviderType
+  status          ConnectionStatus @default(DISCONNECTED)
+  
+  // Credenziali criptate
+  accessToken     String?          @db.Text
+  refreshToken    String?          @db.Text
+  tokenExpiresAt  DateTime?
+  
+  // Aggregatore (se via Tink/SaltEdge)
+  aggregator      String?          // "tink", "saltedge", "direct"
+  externalId      String?          // ID del conto nell'aggregatore
+  
+  // Sync
+  lastSyncAt      DateTime?
+  lastSyncError   String?
+  syncEnabled     Boolean          @default(true)
+  
+  // Relazioni
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccounts    BankAccount[]
+  
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  
+  @@unique([userId, slug])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CONTI BANCARI
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+enum AccountType {
+  CHECKING      // Conto corrente
+  SAVINGS       // Conto deposito
+  CREDIT_CARD   // Carta di credito
+  WALLET        // Wallet digitale (PayPal, Satispay, Revolut)
+  CASH          // Contanti
+}
+
+model BankAccount {
+  id              String      @id @default(cuid())
+  userId          String
+  providerId      String
+  
+  name            String      // "Conto Principale Intesa"
+  type            AccountType
+  iban            String?
+  currency        String      @default("EUR")
+  
+  currentBalance  Float       @default(0)
+  availableBalance Float?
+  
+  // Visibilità
+  includeInTotal  Boolean     @default(true)
+  isArchived      Boolean     @default(false)
+  color           String?     // Colore personalizzato per UI
+  icon            String?     // Emoji o icona
+  sortOrder       Int         @default(0)
+  
+  // Relazioni
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        Provider    @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  transactions    Transaction[]
+  enableBankingSessions EnableBankingSession[]
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// TRANSAZIONI
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+model Transaction {
+  id              String            @id @default(cuid())
+  userId          String
+  bankAccountId   String
+  
+  date            DateTime
+  amount          Float             // Positivo = entrata, Negativo = uscita
+  currency        String            @default("EUR")
+  description     String
+  
+  // Categorizzazione
+  categoryId      String?
+  category        Category?         @relation(fields: [categoryId], references: [id])
+  isRecurring     Boolean           @default(false)
+  
+  // Controparte
+  counterpart     String?           // Nome di chi paga / a chi paghi
+  reference       String?           // Riferimento fattura, causale
+  
+  status          TransactionStatus @default(COMPLETED)
+  
+  // Collegamento fattura
+  invoiceId       String?
+  invoice         Invoice?          @relation(fields: [invoiceId], references: [id])
+  
+  // Collegamento progetto
+  projectId       String?
+  project         Project?          @relation(fields: [projectId], references: [id])
+  
+  // Dati provider originali
+  externalId      String?           // ID nel sistema bancario
+  metadata        Json?             // Dati raw dal provider
+  
+  // Import
+  importLogId     String?
+  importLog       ImportLog?        @relation(fields: [importLogId], references: [id])
+  
+  // Relazioni
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccount     BankAccount       @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  @@index([userId, date])
+  @@index([userId, categoryId])
+  @@index([bankAccountId, date])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CATEGORIE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+enum CategoryType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+model Category {
+  id              String       @id @default(cuid())
+  userId          String
+  name            String       // "Affitto Studio", "Software", "Lavoro"
+  type            CategoryType
+  icon            String?      // Emoji
+  color           String?      // Hex color
+  
+  // Budget mensile (opzionale)
+  monthlyBudget   Float?
+  
+  // Auto-categorizzazione: regole di matching
+  matchRules      Json?        // ["adobe", "creative cloud"] → matcha queste parole
+  
+  // Gerarchia
+  parentId        String?
+  parent          Category?    @relation("CategoryTree", fields: [parentId], references: [id])
+  children        Category[]   @relation("CategoryTree")
+  
+  isSystem        Boolean      @default(false) // Categorie predefinite non eliminabili
+  
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions    Transaction[]
+  
+  createdAt       DateTime     @default(now())
+  
+  @@unique([userId, name])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// FATTURE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+enum InvoiceType {
+  EMESSA      // Fattura attiva (io → cliente)
+  RICEVUTA    // Fattura passiva (fornitore → me)
+}
+
+enum InvoiceStatus {
+  DRAFT       // Bozza
+  SENT        // Inviata / Emessa
+  DELIVERED   // Consegnata via SDI
+  PAID        // Pagata / Incassata
+  OVERDUE     // Scaduta
+  CANCELLED   // Annullata / Nota di credito
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  userId          String
+  
+  type            InvoiceType
+  number          String        // "FE-2026-012"
+  
+  date            DateTime      // Data emissione
+  dueDate         DateTime      // Data scadenza
+  
+  // Importi
+  netAmount       Float         // Imponibile
+  vatRate         Float         @default(22) // Aliquota IVA %
+  vatAmount       Float         // IVA
+  totalAmount     Float         // Totale
+  withholdingTax  Float?        // Ritenuta d'acconto (se applicabile)
+  
+  // Stato
+  status          InvoiceStatus @default(DRAFT)
+  paidDate        DateTime?     // Data effettivo incasso
+  
+  // Controparte
+  clientOrVendor  String        // Nome cliente o fornitore
+  clientVatNumber String?       // P.IVA controparte
+  
+  // SDI / Fattura Elettronica
+  sdiId           String?       // Identificativo SDI
+  sdiStatus       String?       // "consegnata", "accettata", "rifiutata"
+  xmlContent      String?       @db.Text // XML della fattura elettronica
+  
+  // Collegamento progetto
+  projectId       String?
+  project         Project?      @relation(fields: [projectId], references: [id])
+  
+  // Note
+  notes           String?
+  
+  // Relazioni
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions    Transaction[] // Pagamenti collegati
+  
+  // Import
+  importLogId     String?
+  importLog       ImportLog?    @relation(fields: [importLogId], references: [id])
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@index([userId, status])
+  @@index([userId, dueDate])
+  @@unique([userId, number])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DEBITI E RATEIZZAZIONI
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+enum DebtType {
+  RATEIZZAZIONE
+  CARTELLA
+  AVVISO_BONARIO
+  MUTUO
+  PRESTITO
+  ALTRO
+}
+
+enum DebtStatus {
+  ACTIVE
+  COMPLETED
+  DEFAULTED
+  SUSPENDED
+}
+
+model Debt {
+  id              String     @id @default(cuid())
+  userId          String
+  
+  type            DebtType
+  description     String
+  creditor        String     // "Agenzia Entrate-Riscossione", "Banca X"
+  
+  originalAmount  Float      // Importo originale totale
+  remainingAmount Float      // Importo residuo
+  interestRate    Float?     // Tasso di interesse %
+  
+  startDate       DateTime
+  endDate         DateTime?  // Data prevista fine
+  
+  status          DebtStatus @default(ACTIVE)
+  
+  // Relazioni
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  installments    Installment[]
+  
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  
+  @@index([userId, status])
+}
+
+model Installment {
+  id              String   @id @default(cuid())
+  debtId          String
+  
+  number          Int      // Numero rata (1, 2, 3...)
+  amount          Float
+  dueDate         DateTime
+  paidDate        DateTime?
+  isPaid          Boolean  @default(false)
+  
+  debt            Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  
+  @@index([debtId, dueDate])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SCADENZE FISCALI
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+enum TaxType {
+  IVA
+  IRPEF
+  INPS
+  IRAP
+  F24
+  F23
+  ALTRO
+}
+
+model TaxDeadline {
+  id              String   @id @default(cuid())
+  userId          String
+  
+  type            TaxType
+  description     String   // "IVA Liquidazione Mensile Febbraio"
+  
+  dueDate         DateTime
+  amount          Float?   // Importo (null se non ancora calcolato)
+  estimatedAmount Float?   // Stima se l'importo esatto non è noto
+  
+  isPaid          Boolean  @default(false)
+  paidDate        DateTime?
+  paidAmount      Float?
+  
+  // F24 reference
+  f24Code         String?  // Codice tributo
+  
+  isRecurring     Boolean  @default(false)
+  recurringRule   String?  // "monthly_16", "quarterly", "yearly_jun_nov"
+  
+  notes           String?
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([userId, dueDate])
+  @@index([userId, isPaid])
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PROGETTI E LAVORI
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+enum ProjectStatus {
+  PROPOSAL        // Preventivo inviato
+  CONFIRMED       // Confermato, non ancora iniziato
+  IN_PROGRESS     // In lavorazione
+  COMPLETED       // Lavoro finito
+  INVOICED        // Fatturato
+  PAID            // Incassato completamente
+  CANCELLED       // Annullato
+}
+
+model Project {
+  id              String        @id @default(cuid())
+  userId          String
+  
+  name            String
+  client          String
+  description     String?
+  
+  // Importi
+  totalAmount     Float         // Valore totale del lavoro
+  invoicedAmount  Float         @default(0) // Quanto fatturato finora
+  paidAmount      Float         @default(0) // Quanto incassato finora
+  
+  // Stato
+  status          ProjectStatus @default(PROPOSAL)
+  progress        Int           @default(0) // 0-100 percentuale completamento
+  probability     Int?          // Probabilità chiusura (solo per PROPOSAL) 0-100
+  
+  // Date
+  startDate       DateTime?
+  endDate         DateTime?
+  deadline        DateTime?
+  
+  // Relazioni
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoices        Invoice[]
+  transactions    Transaction[]
+  milestones      Milestone[]
+  
+  notes           String?       @db.Text
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@index([userId, status])
+}
+
+model Milestone {
+  id              String   @id @default(cuid())
+  projectId       String
+  
+  name            String   // "Consegna prima bozza", "Montaggio finale"
+  amount          Float?   // Importo associato alla milestone
+  dueDate         DateTime?
+  completedDate   DateTime?
+  isCompleted     Boolean  @default(false)
+  sortOrder       Int      @default(0)
+  
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// IMPORT LOG (per CSV/Excel e sync)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+enum ImportSource {
+  CSV_BANK        // Export CSV dalla banca
+  CSV_ACCOUNTANT  // Export dal commercialista
+  XML_SDI         // XML fatture elettroniche
+  API_SYNC        // Sync automatica da provider
+  MANUAL          // Inserimento manuale
+}
+
+model ImportLog {
+  id              String       @id @default(cuid())
+  userId          String
+  
+  source          ImportSource
+  filename        String?
+  
+  recordsTotal    Int          @default(0)
+  recordsImported Int          @default(0)
+  recordsSkipped  Int          @default(0)
+  recordsError    Int          @default(0)
+  
+  errors          Json?        // Lista errori dettagliati
+  
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions    Transaction[]
+  invoices        Invoice[]
+  
+  createdAt       DateTime     @default(now())
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SNAPSHOT SALDI (per storico patrimonio)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+model BalanceSnapshot {
+  id              String   @id @default(cuid())
+  bankAccountId   String
+  
+  date            DateTime
+  balance         Float
+  
+  @@unique([bankAccountId, date])
+  @@index([bankAccountId, date])
+}
