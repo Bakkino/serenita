@@ -12,8 +12,12 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
 
   const body = await req.json();
-  const aspspName = body.aspsp_name || "Intesa Sanpaolo";
-  const aspspCountry = body.country || "IT";
+  const aspspName = body.aspsp_name;
+  const aspspCountry = body.country;
+
+  if (!aspspName || !aspspCountry) {
+    return NextResponse.json({ error: "Seleziona una banca" }, { status: 400 });
+  }
 
   try {
     // Genera state CSRF — salvato temporaneamente come VerificationToken
