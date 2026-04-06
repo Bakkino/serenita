@@ -143,6 +143,22 @@ export async function confirmSession(code: string): Promise<ConfirmSessionResult
   return data;
 }
 
+// Recupera i dettagli di una sessione (inclusi account)
+// Utile quando POST /sessions ritorna accounts vuoto (es. FinecoBank)
+export async function getSession(sessionId: string): Promise<any> {
+  const response = await fetchWithRetry(`${API_BASE}/sessions/${sessionId}`, {
+    method: "GET",
+    headers: authHeaders(),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Enable Banking get session error: ${response.status}: ${errorBody}`);
+  }
+
+  return response.json();
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Recupero saldi
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

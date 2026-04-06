@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { confirmSession } from "@/lib/enablebanking";
+import { confirmSession, getSession } from "@/lib/enablebanking";
 import { prisma } from "@/lib/prisma";
 
 // GET /api/callback?code=xxx&state=yyy
@@ -103,7 +103,39 @@ export async function GET(req: Request) {
     : new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
   let accountsCreated = 0;
 
-  const accounts = sessionData.accounts || [];
+  let accounts = sessionData.accounts || [];
+
+  // Alcune banche (es. FinecoBank) non restituiscono gli account nella conferma sessione.
+  // In quel caso, li recuperiamo con GET /sessions/{session_id}
+  if (accounts.length === 0 && sessionData.session_id) {
+    try {
+      const sessionDetails = await getSession(sessionData.session_id);
+      // GET /sessions restituisce accounts come array di UID + accounts_data con dettagli
+      const accountUids: string[] = sessionDetails.accounts || [];
+      const accountsData = sessionDetails.accounts_data || [];
+
+      // Costruisci array di account nel formato che ci aspettiamo
+      for (const uid of accountUids) {
+        const detail = accountsData.find((a: any) => a.uid === uid) || {};
+        accounts.push({
+          uid,
+          account_id: detail.account_id || {},
+          name: detail.name || null,
+          currency: detail.currency || "EUR",
+          identification_hash: detail.identification_hash || null,
+          product: detail.product || null,
+        });
+      }
+    } catch (err) {
+      console.error("[callback] Errore recupero account da sessione:", (err as Error).message);
+    }
+  }
+
+  // Salva info debug aggiornata
+  await prisma.provider.update({
+    where: { id: provider.id },
+    data: { lastSyncError: `ACCOUNTS_FOUND: ${accounts.length}, RAW: ${JSON.stringify(accounts).slice(0, 400)}` },
+  });
 
   for (const account of accounts) {
     // uid è l'identificativo per le chiamate API (GET /accounts/{uid}/balances)
