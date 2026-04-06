@@ -12,7 +12,7 @@ function getPrivateKey(): string {
 
 // Genera un JWT firmato RS256 per autenticarsi con Enable Banking
 // Durata breve (5 minuti) come richiesto dall'API
-function generateJWT(): string {
+export function generateJWT(): string {
   const now = Math.floor(Date.now() / 1000);
   const payload = {
     iss: "enablebanking.com",
