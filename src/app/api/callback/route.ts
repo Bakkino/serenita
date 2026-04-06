@@ -150,10 +150,26 @@ export async function GET(req: Request) {
     debugInfo.push(`ACCOUNTS: ${JSON.stringify(accounts).slice(0, 300)}`);
   }
 
-  // Salva info debug aggiornata
+  // Salva debug in VerificationToken (non viene cancellato dal sync)
+  const debugToken = debugInfo.join(" | ").slice(0, 900);
+  await prisma.verificationToken.create({
+    data: {
+      identifier: `debug_callback_${userId}`,
+      token: debugToken,
+      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 giorni
+    },
+  }).catch(() => {
+    // Se esiste già, aggiorna
+    return prisma.verificationToken.updateMany({
+      where: { identifier: `debug_callback_${userId}` },
+      data: { token: debugToken },
+    });
+  });
+
+  // Salva anche nel provider
   await prisma.provider.update({
     where: { id: provider.id },
-    data: { lastSyncError: debugInfo.join(" | ").slice(0, 900) },
+    data: { lastSyncError: debugToken },
   });
 
   for (const account of accounts) {

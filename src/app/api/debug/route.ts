@@ -40,10 +40,17 @@ export async function GET() {
     },
   });
 
+  // Debug callback persistenti (non cancellati dal sync)
+  const debugTokens = await prisma.verificationToken.findMany({
+    where: { identifier: { startsWith: "debug_" } },
+    select: { identifier: true, token: true, expires: true },
+  });
+
   return NextResponse.json({
     users,
     providers,
     sessions,
     bankAccounts,
+    debugTokens,
   });
 }
