@@ -58,9 +58,12 @@ export async function GET(req: Request) {
   }
 
   // Salva la risposta raw nel Provider per debug (temporaneo)
+  const debugInfo: string[] = [];
+  debugInfo.push(`CONFIRM: ${JSON.stringify(sessionData).slice(0, 300)}`);
+
   await prisma.provider.updateMany({
     where: { userId, slug: "enable-banking" },
-    data: { lastSyncError: `RAW: ${JSON.stringify(sessionData).slice(0, 500)}` },
+    data: { lastSyncError: debugInfo.join(" | ") },
   });
 
   // Cerca o crea il Provider "Enable Banking" per l'utente
@@ -110,31 +113,47 @@ export async function GET(req: Request) {
   if (accounts.length === 0 && sessionData.session_id) {
     try {
       const sessionDetails = await getSession(sessionData.session_id);
-      // GET /sessions restituisce accounts come array di UID + accounts_data con dettagli
-      const accountUids: string[] = sessionDetails.accounts || [];
-      const accountsData = sessionDetails.accounts_data || [];
+      debugInfo.push(`GET_SESSION: ${JSON.stringify(sessionDetails).slice(0, 400)}`);
 
-      // Costruisci array di account nel formato che ci aspettiamo
-      for (const uid of accountUids) {
-        const detail = accountsData.find((a: any) => a.uid === uid) || {};
-        accounts.push({
-          uid,
-          account_id: detail.account_id || {},
-          name: detail.name || null,
-          currency: detail.currency || "EUR",
-          identification_hash: detail.identification_hash || null,
-          product: detail.product || null,
-        });
+      // GET /sessions può restituire accounts in diversi formati:
+      // 1. Array di oggetti completi (come POST /sessions)
+      // 2. Array di UID stringa + accounts_data separato
+      const rawAccounts = sessionDetails.accounts || [];
+
+      if (rawAccounts.length > 0) {
+        if (typeof rawAccounts[0] === "string") {
+          // Formato: array di UID stringa
+          const accountsData = sessionDetails.accounts_data || [];
+          for (const uid of rawAccounts) {
+            const detail = accountsData.find((a: any) => a.uid === uid) || {};
+            accounts.push({
+              uid,
+              account_id: detail.account_id || {},
+              name: detail.name || null,
+              currency: detail.currency || "EUR",
+              identification_hash: detail.identification_hash || null,
+              product: detail.product || null,
+            });
+          }
+        } else {
+          // Formato: array di oggetti account completi
+          accounts = rawAccounts;
+        }
       }
     } catch (err) {
-      console.error("[callback] Errore recupero account da sessione:", (err as Error).message);
+      debugInfo.push(`GET_SESSION_ERR: ${(err as Error).message}`);
     }
+  }
+
+  debugInfo.push(`ACCOUNTS_FOUND: ${accounts.length}`);
+  if (accounts.length > 0) {
+    debugInfo.push(`ACCOUNTS: ${JSON.stringify(accounts).slice(0, 300)}`);
   }
 
   // Salva info debug aggiornata
   await prisma.provider.update({
     where: { id: provider.id },
-    data: { lastSyncError: `ACCOUNTS_FOUND: ${accounts.length}, RAW: ${JSON.stringify(accounts).slice(0, 400)}` },
+    data: { lastSyncError: debugInfo.join(" | ").slice(0, 900) },
   });
 
   for (const account of accounts) {
