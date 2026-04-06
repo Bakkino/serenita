@@ -125,10 +125,15 @@ export async function confirmSession(code: string): Promise<ConfirmSessionResult
   });
 
   if (!response.ok) {
-    throw new Error(`Enable Banking session error: ${response.status}`);
+    const errorBody = await response.text();
+    console.error("[confirmSession] error:", response.status, errorBody);
+    throw new Error(`Enable Banking session error: ${response.status}: ${errorBody}`);
   }
 
-  return response.json();
+  const data = await response.json();
+  console.log("[confirmSession] RAW response keys:", Object.keys(data));
+  console.log("[confirmSession] RAW response:", JSON.stringify(data).slice(0, 2000));
+  return data;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

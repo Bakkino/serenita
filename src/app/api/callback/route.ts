@@ -51,6 +51,8 @@ export async function GET(req: Request) {
   let sessionData;
   try {
     sessionData = await confirmSession(code);
+    // Log completo della risposta per debug
+    console.log("[callback] confirmSession response:", JSON.stringify(sessionData, null, 2));
   } catch (err) {
     console.error("Enable Banking session confirmation failed:", (err as Error).message);
     return NextResponse.redirect(
@@ -86,9 +88,15 @@ export async function GET(req: Request) {
   const validUntil = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
   let accountsCreated = 0;
 
-  for (const account of sessionData.accounts) {
+  console.log("[callback] accounts array length:", sessionData.accounts?.length || 0);
+
+  for (const account of sessionData.accounts || []) {
+    console.log("[callback] processing account:", JSON.stringify(account));
     const ebAccountId = account.account_id?.value;
-    if (!ebAccountId) continue;
+    if (!ebAccountId) {
+      console.log("[callback] SKIP: no account_id.value");
+      continue;
+    }
 
     const iban = account.iban || null;
 
