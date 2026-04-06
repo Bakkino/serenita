@@ -93,8 +93,9 @@ export async function startAuth(params: StartAuthParams): Promise<StartAuthResul
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Enable Banking auth error: ${response.status}`);
+    const errorBody = await response.text();
+    console.error("Enable Banking auth response:", response.status, errorBody);
+    throw new Error(`Enable Banking auth error ${response.status}: ${errorBody}`);
   }
 
   const data = await response.json();

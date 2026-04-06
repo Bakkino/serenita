@@ -25,11 +25,19 @@ export async function POST(req: Request) {
     },
   });
 
-  const result = await startAuth({
-    aspspName,
-    aspspCountry,
-    state,
-  });
+  try {
+    const result = await startAuth({
+      aspspName,
+      aspspCountry,
+      state,
+    });
 
-  return NextResponse.json({ url: result.url, state });
+    return NextResponse.json({ url: result.url, state });
+  } catch (err) {
+    console.error("Banking auth error:", (err as Error).message);
+    return NextResponse.json(
+      { error: (err as Error).message },
+      { status: 500 }
+    );
+  }
 }
