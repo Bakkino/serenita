@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
 import { confirmSession } from "@/lib/enablebanking";
 import { prisma } from "@/lib/prisma";
 
@@ -48,17 +47,21 @@ export async function GET(req: Request) {
   });
 
   // Conferma la sessione con Enable Banking
-  let sessionData;
+  let sessionData: any;
   try {
     sessionData = await confirmSession(code);
-    // Log completo della risposta per debug
-    console.log("[callback] confirmSession response:", JSON.stringify(sessionData, null, 2));
   } catch (err) {
     console.error("Enable Banking session confirmation failed:", (err as Error).message);
     return NextResponse.redirect(
       `${appUrl}/connettori?error=Errore nella conferma bancaria. Riprova.`
     );
   }
+
+  // Salva la risposta raw nel Provider per debug (temporaneo)
+  await prisma.provider.updateMany({
+    where: { userId, slug: "enable-banking" },
+    data: { lastSyncError: `RAW: ${JSON.stringify(sessionData).slice(0, 500)}` },
+  });
 
   // Cerca o crea il Provider "Enable Banking" per l'utente
   let provider = await prisma.provider.findFirst({
@@ -80,25 +83,37 @@ export async function GET(req: Request) {
   } else {
     await prisma.provider.update({
       where: { id: provider.id },
-      data: { status: "CONNECTED", lastSyncError: null },
+      data: { status: "CONNECTED" },
     });
   }
 
+  // Estrai nome banca dalla risposta (se disponibile)
+  const aspspName = sessionData.aspsp?.name || "Intesa Sanpaolo";
+  const aspspCountry = sessionData.aspsp?.country || "IT";
+
   // Per ogni account ricevuto, crea EnableBankingSession e BankAccount
-  const validUntil = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+  // Struttura API Enable Banking:
+  //   account.uid → ID univoco per chiamate API (saldi, transazioni)
+  //   account.account_id.iban → IBAN
+  //   account.name → nome titolare
+  //   account.currency → valuta
+  //   account.identification_hash → hash per matching tra sessioni
+  const validUntil = sessionData.access?.valid_until
+    ? new Date(sessionData.access.valid_until)
+    : new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
   let accountsCreated = 0;
 
-  console.log("[callback] accounts array length:", sessionData.accounts?.length || 0);
+  const accounts = sessionData.accounts || [];
 
-  for (const account of sessionData.accounts || []) {
-    console.log("[callback] processing account:", JSON.stringify(account));
-    const ebAccountId = account.account_id?.value;
-    if (!ebAccountId) {
-      console.log("[callback] SKIP: no account_id.value");
-      continue;
-    }
+  for (const account of accounts) {
+    // uid è l'identificativo per le chiamate API (GET /accounts/{uid}/balances)
+    const ebAccountId = account.uid || account.account_id?.value || account.identification_hash;
+    if (!ebAccountId) continue;
 
-    const iban = account.iban || null;
+    // IBAN può essere in account_id.iban o direttamente in account.iban
+    const iban = account.account_id?.iban || account.iban || null;
+    const currency = account.currency || "EUR";
+    const accountName = account.name || account.product || (iban ? `Conto ${iban.slice(-4)}` : "Conto bancario");
 
     // Cerca se esiste già un BankAccount con questo IBAN
     let bankAccount = iban
@@ -113,10 +128,10 @@ export async function GET(req: Request) {
         data: {
           userId,
           providerId: provider.id,
-          name: account.account_name || (iban ? `Conto ${iban.slice(-4)}` : "Conto bancario"),
+          name: accountName,
           type: "CHECKING",
           iban,
-          currency: "EUR",
+          currency,
           currentBalance: 0,
         },
       });
@@ -148,8 +163,8 @@ export async function GET(req: Request) {
           accountId: ebAccountId,
           bankAccountId: bankAccount.id,
           iban,
-          aspspName: "Intesa Sanpaolo", // TODO: passare dalla sessione
-          aspspCountry: "IT",
+          aspspName,
+          aspspCountry,
           validUntil,
           isActive: true,
         },

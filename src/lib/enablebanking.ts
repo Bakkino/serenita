@@ -110,10 +110,17 @@ export async function startAuth(params: StartAuthParams): Promise<StartAuthResul
 export interface ConfirmSessionResult {
   session_id: string;
   accounts: Array<{
-    account_id: { value: string };
-    iban?: string;
-    account_name?: string;
+    uid: string;                          // ID univoco per chiamate API
+    account_id: { iban?: string; other?: any };
+    name?: string;                        // Nome titolare
+    currency?: string;
+    cash_account_type?: string;
+    identification_hash?: string;
+    product?: string;
+    all_account_ids?: Array<{ iban?: string }>;
   }>;
+  aspsp?: { name: string; country: string };
+  access?: { valid_until: string };
 }
 
 // Step 2: Conferma la sessione con il code ricevuto dal callback
