@@ -74,7 +74,7 @@ export interface StartAuthResult {
 // Step 1: Inizia l'autorizzazione — ritorna l'URL dove reindirizzare l'utente
 export async function startAuth(params: StartAuthParams): Promise<StartAuthResult> {
   // URL di callback — deve corrispondere ESATTAMENTE a quello registrato su Enable Banking
-  const redirectUrl = "https://serenita-paolos-projects-be858cf6.vercel.app/api/callback";
+  const redirectUrl = "https://serenita-lime.vercel.app/api/callback";
 
   const response = await fetchWithRetry(`${API_BASE}/auth`, {
     method: "POST",

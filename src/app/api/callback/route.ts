@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
 
-  const appUrl = process.env.NEXTAUTH_URL || "https://serenita-paolos-projects-be858cf6.vercel.app";
+  const appUrl = process.env.NEXTAUTH_URL || "https://serenita-lime.vercel.app";
 
   if (!code || !state) {
     return NextResponse.redirect(
